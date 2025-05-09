@@ -135,7 +135,7 @@ const client = new Mistral({ apiKey });
 
    console.log("Enviando para o modelo Mistral...");
     const chatResponse = await client.chat.complete({
-      model: 'pixtral-large-latest',
+      model: 'mistral-small-latest',
       messages: [
         {
           role: 'user',
