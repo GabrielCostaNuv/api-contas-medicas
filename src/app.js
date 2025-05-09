@@ -3,37 +3,42 @@ import axios from 'axios';
 import { Mistral } from '@mistralai/mistralai';
 import "dotenv/config"
 
-import fs from 'fs';
 const app = express();
-
-
 
 app.use(express.json());
 
 app.post("/",async(req, res) => {
+  try {
     const apiKey = process.env.MISTRAL_API_KEY;
+     if (!apiKey) {
+      return res.status(500).json({ error: "Chave da API MISTRAL não definida." });
+    }
+
 const client = new Mistral({ apiKey });
-    console.log("começou");
-
-   const teste = await axios.get(req.body.url,{responseType: 'arraybuffer'})
-   const blob = new Blob([teste.data]);
-   console.log("0")
-
-   const uploadedFile = await client.files.upload({
-    file: {
-      fileName: 'documento.pdf',
-      content: blob,
-    },
-    purpose: 'ocr',
-  });
-  console.log("0.1")
 
 
-  const signedUrlResponse = await client.files.getSignedUrl({
-    fileId: uploadedFile.id,
-  });
+   if (!req.body.url) {
+      return res.status(400).json({ error: "URL do PDF não fornecida no corpo da requisição." });
+    }
 
-  const prompt = `
+    console.log("Iniciando download do PDF...");
+    const buffer = await axios.get(req.body.url, { responseType: 'arraybuffer' });
+    const blob = new Blob([buffer.data]);
+
+     console.log("Enviando arquivo para o Mistral...");
+    const uploadedFile = await client.files.upload({
+      file: {
+        fileName: 'documento.pdf',
+        content: blob,
+      },
+      purpose: 'ocr',
+    });
+
+    const signedUrlResponse = await client.files.getSignedUrl({
+      fileId: uploadedFile.id,
+    });
+
+      const prompt = `
   Você está recebendo como entrada o conteúdo completo de um PDF de uma fatura médica com várias guias de atendimento (Consultas ou Exames), incluindo uma capa de lote com informações complementares.
   
   ### Tarefa:
@@ -128,28 +133,47 @@ const client = new Mistral({ apiKey });
   Retorne **apenas o JSON completo**, sem comentários ou marcações.
   `;
 
-  const chatResponse = await client.chat.complete({
-    model: 'pixtral-large-latest',
-    messages: [
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: prompt },
-          { type: 'document_url', documentUrl: signedUrlResponse.url },
-        ],
-      },
-    ],
-  });
+   console.log("Enviando para o modelo Mistral...");
+    const chatResponse = await client.chat.complete({
+      model: 'pixtral-large-latest',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'document_url', documentUrl: signedUrlResponse.url },
+          ],
+        },
+      ],
+    });
 
-  const responseJson = chatResponse.choices[0].message.content;
-  console.log(responseJson)
+    const responseJson = chatResponse.choices[0].message.content;
+    console.log("Resposta recebida do modelo.");
 
-//    const buffer = Buffer.from(teste.data);
-//    await fs.writeFile("pdf.pdf", buffer, ()=>{
-//     console.log("escreveu");
-//    });
-//    console.log("PDF salvo em ");
-    res.status(200).json({data:responseJson})
-})
+    res.status(200).json({ data: responseJson });
+  } catch (error) {
+      console.error("Erro durante o processamento:", error);
+
+    if (axios.isAxiosError(error)) {
+      return res.status(500).json({
+        error: "Erro ao baixar o PDF da URL fornecida.",
+        details: error.message
+      });
+    }
+
+    if (error?.response?.data) {
+      return res.status(500).json({
+        error: "Erro na comunicação com a API da Mistral.",
+        details: error.response.data
+      });
+    }
+
+    res.status(500).json({
+      error: "Erro inesperado no servidor.",
+      details: error instanceof Error ? error.message : String(error)
+    });
+  }
+  })
+  
 
 export default app;
